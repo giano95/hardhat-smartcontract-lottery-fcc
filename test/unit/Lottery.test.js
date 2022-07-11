@@ -128,6 +128,7 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
               })
           })
 
+          // Test the function that request a random Winner
           describe("performUpkeep", function () {
               // do everything right and then call performUpKeep
               it("can only run if checkupkeep is true", async () => {
@@ -155,6 +156,82 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
                   const requestId = txReceipt.events[1].args.requestId
                   assert(requestId.toNumber() > 0)
                   assert(lotteryState == 1) // 0 = open, 1 = calculating
+              })
+          })
+
+          // test the function that we execute after requesting a random winner
+          describe("fulfillRandomWords", function () {
+              // we want that somebody has enter the lottery and interval has elapsed
+              // in order to test the fullfillRandomWords function
+              beforeEach(async () => {
+                  await lottery.enterLottery({ value: lotteryEntranceFee })
+                  await network.provider.send("evm_increaseTime", [lotteryInterval + 1])
+                  await network.provider.request({ method: "evm_mine", params: [] })
+              })
+
+              it("can only be called after performUpkeep", async () => {
+                  await expect(
+                      vrfCoordinatorV2Mock.fulfillRandomWords(0, lottery.address) // reverts if not fulfilled
+                  ).to.be.revertedWith("nonexistent request")
+                  await expect(
+                      vrfCoordinatorV2Mock.fulfillRandomWords(1, lottery.address) // reverts if not fulfilled
+                  ).to.be.revertedWith("nonexistent request")
+              })
+
+              // This test is too big...
+              it("picks a winner, resets, and sends money", async () => {
+                  const additionalEntrances = 3 // to test
+                  const startingIndex = 2
+                  for (let i = startingIndex; i < startingIndex + additionalEntrances; i++) {
+                      // i = 2; i < 5; i=i+1
+                      raffle = raffleContract.connect(accounts[i]) // Returns a new instance of the Raffle contract connected to player
+                      await raffle.enterRaffle({ value: raffleEntranceFee })
+                  }
+                  const startingTimeStamp = await raffle.getLastTimeStamp() // stores starting timestamp (before we fire our event)
+
+                  // This will be more important for our staging tests...
+                  await new Promise(async (resolve, reject) => {
+                      raffle.once("WinnerPicked", async () => {
+                          // event listener for WinnerPicked
+                          console.log("WinnerPicked event fired!")
+                          // assert throws an error if it fails, so we need to wrap
+                          // it in a try/catch so that the promise returns event
+                          // if it fails.
+                          try {
+                              // Now lets get the ending values...
+                              const recentWinner = await raffle.getRecentWinner()
+                              const raffleState = await raffle.getRaffleState()
+                              const winnerBalance = await accounts[2].getBalance()
+                              const endingTimeStamp = await raffle.getLastTimeStamp()
+                              await expect(raffle.getPlayer(0)).to.be.reverted
+                              // Comparisons to check if our ending values are correct:
+                              assert.equal(recentWinner.toString(), accounts[2].address)
+                              assert.equal(raffleState, 0)
+                              assert.equal(
+                                  winnerBalance.toString(),
+                                  startingBalance // startingBalance + ( (raffleEntranceFee * additionalEntrances) + raffleEntranceFee )
+                                      .add(
+                                          raffleEntranceFee
+                                              .mul(additionalEntrances)
+                                              .add(raffleEntranceFee)
+                                      )
+                                      .toString()
+                              )
+                              assert(endingTimeStamp > startingTimeStamp)
+                              resolve() // if try passes, resolves the promise
+                          } catch (e) {
+                              reject(e) // if try fails, rejects the promise
+                          }
+                      })
+
+                      const tx = await raffle.performUpkeep("0x")
+                      const txReceipt = await tx.wait(1)
+                      const startingBalance = await accounts[2].getBalance()
+                      await vrfCoordinatorV2Mock.fulfillRandomWords(
+                          txReceipt.events[1].args.requestId,
+                          raffle.address
+                      )
+                  })
               })
           })
       })
