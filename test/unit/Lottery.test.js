@@ -2,7 +2,7 @@ const { assert, expect } = require("chai")
 const { network, deployments, ethers } = require("hardhat")
 const { developmentChains, networkConfig } = require("../../helper-hardhat-config")
 
-// We do unit test only on dev/local chains, so for real one we skip
+// We do unit test only on dev/local chains, so for real ones we skip
 !developmentChains.includes(network.name)
     ? describe.skip
     : describe("Lottery Unit Tests", function () {
@@ -13,9 +13,11 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
           const lotteryInterval = 30 // the one we choose in deploy
 
           beforeEach(async function () {
-              deployer = (await getNamedAccounts()).deployer // wallet of the deployer
+              accounts = await ethers.getSigners()
+              deployer = accounts[0]
               await deployments.fixture(["all"]) // deploy all the contracts
-              lottery = await ethers.getContract("Lottery", deployer) // lottery contract
+              lotteryContract = await ethers.getContract("Lottery") // lottery contract
+              lottery = lotteryContract.connect(deployer) // lottery contract with wallet connected
               vrfCoordinatorV2Mock = await ethers.getContract("VRFCoordinatorV2Mock", deployer) // mock contract
               lotteryEntranceFee = await lottery.getEntranceFee() // entrance fee
           })
@@ -46,13 +48,13 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
               it("add the user to the players array", async () => {
                   await lottery.enterLottery({ value: lotteryEntranceFee })
                   const playerAddress = await lottery.getPlayer(0)
-                  assert.equal(playerAddress, deployer)
+                  assert.equal(playerAddress, deployer.address)
               })
 
               it("emits an event when user enter the lottery", async () => {
                   await expect(lottery.enterLottery({ value: lotteryEntranceFee }))
                       .to.emit(lottery, "enterLotteryEvent")
-                      .withArgs(deployer)
+                      .withArgs(deployer.address)
               })
 
               it("doesn't allow entrance when lottery is calculating", async () => {
@@ -180,56 +182,59 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
 
               // This test is too big...
               it("picks a winner, resets, and sends money", async () => {
-                  const additionalEntrances = 3 // to test
-                  const startingIndex = 2
+                  const additionalEntrances = 3
+                  const startingIndex = 1
                   for (let i = startingIndex; i < startingIndex + additionalEntrances; i++) {
-                      // i = 2; i < 5; i=i+1
-                      raffle = raffleContract.connect(accounts[i]) // Returns a new instance of the Raffle contract connected to player
-                      await raffle.enterRaffle({ value: raffleEntranceFee })
+                      lottery = lotteryContract.connect(accounts[i])
+                      await lottery.enterLottery({ value: lotteryEntranceFee })
                   }
-                  const startingTimeStamp = await raffle.getLastTimeStamp() // stores starting timestamp (before we fire our event)
+                  const startingTimeStamp = await lottery.getLastTimeStamp() // stores starting timestamp (before we fire our event)
 
-                  // This will be more important for our staging tests...
+                  // This reason we use a Promis will be more important for our staging tests...
                   await new Promise(async (resolve, reject) => {
-                      raffle.once("WinnerPicked", async () => {
-                          // event listener for WinnerPicked
-                          console.log("WinnerPicked event fired!")
+                      // 1. start by declaring an event listener for WinnerPickedEvent, basically a portion of code
+                      // *  tha will be executed when a WinnerPickedEvent trigger
+                      lottery.once("WinnerPickedEvent", async () => {
                           // assert throws an error if it fails, so we need to wrap
-                          // it in a try/catch so that the promise returns event
-                          // if it fails.
+                          // it in a try/catch so that the promise returns event if it fails.
                           try {
-                              // Now lets get the ending values...
-                              const recentWinner = await raffle.getRecentWinner()
-                              const raffleState = await raffle.getRaffleState()
-                              const winnerBalance = await accounts[2].getBalance()
-                              const endingTimeStamp = await raffle.getLastTimeStamp()
-                              await expect(raffle.getPlayer(0)).to.be.reverted
-                              // Comparisons to check if our ending values are correct:
-                              assert.equal(recentWinner.toString(), accounts[2].address)
-                              assert.equal(raffleState, 0)
+                              // Now lets get to the testing part, initialize param
+                              const recentWinner = await lottery.getRecentWinner()
+                              const lotteryState = await lottery.getLotteryState()
+                              const numPlayers = await lottery.getNumPlayers()
+                              const endingTimeStamp = await lottery.getLastTimeStamp()
+                              const winnerBalance = await accounts[1].getBalance()
+
+                              // Check if they are correct
+                              assert.equal(numPlayers.toString(), "0")
+                              assert.equal(lotteryState, "0")
+                              assert(endingTimeStamp > startingTimeStamp)
                               assert.equal(
                                   winnerBalance.toString(),
-                                  startingBalance // startingBalance + ( (raffleEntranceFee * additionalEntrances) + raffleEntranceFee )
-                                      .add(
-                                          raffleEntranceFee
-                                              .mul(additionalEntrances)
-                                              .add(raffleEntranceFee)
-                                      )
+                                  startingBalance
+                                      .add(lotteryEntranceFee.mul(additionalEntrances + 1))
                                       .toString()
                               )
-                              assert(endingTimeStamp > startingTimeStamp)
-                              resolve() // if try passes, resolves the promise
                           } catch (e) {
-                              reject(e) // if try fails, rejects the promise
+                              console.log(e)
+                              reject(e)
                           }
+
+                          // if try passes, resolves the promise
+                          resolve()
                       })
 
-                      const tx = await raffle.performUpkeep("0x")
+                      // 2. we call performUpkeep that call requestRandomWords
+                      const tx = await lottery.performUpkeep("0x")
                       const txReceipt = await tx.wait(1)
-                      const startingBalance = await accounts[2].getBalance()
+
+                      // 2.1 saving the balance of the winner (we know the winner because we are using mocks)
+                      const startingBalance = await accounts[1].getBalance()
+
+                      // 3. finally we call fullfillRandomWords that will trigger the WinnerPickedEvent listener
                       await vrfCoordinatorV2Mock.fulfillRandomWords(
                           txReceipt.events[1].args.requestId,
-                          raffle.address
+                          lottery.address
                       )
                   })
               })

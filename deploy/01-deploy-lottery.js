@@ -24,7 +24,7 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
         await vrfCoordinatorV2Mock.fundSubscription(subscriptionId, ethers.utils.parseEther("10"))
     } else {
         // If we are on a real chain we take vrf adress and subscription ID from our help-hardhat-config
-        vrfCoordinatorAddress = networkConfig[chainId][vrfCoordinatorAddress]
+        vrfCoordinatorAddress = networkConfig[chainId]["vrfCoordinatorAddress"]
         subscriptionId = networkConfig[chainId]["subscriptionId"]
     }
 

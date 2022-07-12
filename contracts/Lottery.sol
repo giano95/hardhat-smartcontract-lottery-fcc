@@ -89,11 +89,10 @@ contract Lottery is VRFConsumerBaseV2, KeeperCompatibleInterface {
         uint256, /* requestId */
         uint256[] memory randomWords
     ) internal override {
-        // Select the index of the winner using the module operator, save it and emit the event
+        // Select the index of the winner using the module operator and save it
         uint256 indexOfWinner = randomWords[0] % s_players.length;
         address payable winner = s_players[indexOfWinner];
         s_recentWinner = winner;
-        emit WinnerPickedEvent(winner);
 
         // Reset the player's array and the timestamp
         s_players = new address payable[](0);
@@ -105,8 +104,9 @@ contract Lottery is VRFConsumerBaseV2, KeeperCompatibleInterface {
             revert Lottery__WinnerTransferFailed();
         }
 
-        // Update the state
+        // Update the state and finally emit the event
         s_lotteryState = LotteryState.OPEN;
+        emit WinnerPickedEvent(winner);
     }
 
     /**
@@ -194,7 +194,7 @@ contract Lottery is VRFConsumerBaseV2, KeeperCompatibleInterface {
         return i_lotteryInterval;
     }
 
-    function getNumberOfPlayers() public view returns (uint256) {
+    function getNumPlayers() public view returns (uint256) {
         return s_players.length;
     }
 }

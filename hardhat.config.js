@@ -19,6 +19,14 @@ module.exports = {
             url: process.env.RINKEBY_RPC_URL || "",
             accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
             blockConfirmations: 3,
+            saveDeployments: true,
+        },
+        kovan: {
+            chainId: 42,
+            url: process.env.KOVAN_RPC_URL || "",
+            accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+            blockConfirmations: 3,
+            saveDeployments: true,
         },
     },
     namedAccounts: {
@@ -36,5 +44,15 @@ module.exports = {
         currency: "USD",
         //coinmarketcap: process.env.COINMARKETCAP_API_KEY,
         //token: "ETH",
+    },
+    mocha: {
+        // we set the maximum time a test can reach : 300 s
+        timeout: 300000,
+    },
+    etherscan: {
+        apiKey: {
+            rinkeby: process.env.ETHERSCAN_API_KEY,
+            kovan: process.env.ETHERSCAN_API_KEY,
+        },
     },
 }
